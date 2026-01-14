@@ -44,6 +44,20 @@ The API provides endpoints for:
 -   **Wallet & Payments:** `/api/wallet`, `/api/wallet/fund`, `/api/wallet/webhook`, `/api/wallet/transactions`
 -   **Calls:** `/api/calls/initiate`, `/api/calls/:call_id/answer`, `/api/calls/:call_id/end`, `/api/calls/history`, `/api/calls/:call_id`
 
+## Formal API Documentation
+
+This project includes a formal API specification using the OpenAPI 3.0 standard in the `openapi.yaml` file.
+
+This file provides a detailed, machine-readable definition of every endpoint, parameter, and data model in the API.
+
+### Viewing the Documentation
+
+To view the specification as an interactive web page, you can use a tool like the online Swagger Editor:
+
+1.  Open the `openapi.yaml` file and copy its entire content.
+2.  Go to the **[Swagger Editor](https://editor.swagger.io/)**.
+3.  Paste the content into the editor to see the documentation.
+
 ## Testing with Postman
 
 This section guides you through testing the API using Postman.

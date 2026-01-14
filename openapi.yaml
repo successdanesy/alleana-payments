@@ -1,0 +1,482 @@
+openapi: 3.0.0
+info:
+  title: AIleana Payments & Calls API
+  description: The backend service for AIleana, a demo application for wallet management, payment processing, and call session tracking.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the user.
+        email:
+          type: string
+          format: email
+          description: User's email address.
+        full_name:
+          type: string
+          description: User's full name.
+    
+    Wallet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        balance:
+          type: number
+          format: decimal
+        currency:
+          type: string
+          example: NGN
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [deposit, withdrawal, call_charge, refund]
+        amount:
+          type: number
+          format: decimal
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        reference:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    
+    CallSession:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        caller_id:
+          type: string
+          format: uuid
+        receiver_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [initiated, ringing, ongoing, ended, failed, missed]
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+        billed_minutes:
+          type: integer
+        rate_per_minute:
+          type: number
+          format: decimal
+        total_charge:
+          type: number
+          format: decimal
+        end_reason:
+          type: string
+          
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []
+
+paths:
+  /api/auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                full_name:
+                  type: string
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+                      token:
+                        type: string
+        '400':
+          description: Validation error or user already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Authenticate a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+                      token:
+                        type: string
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/wallet:
+    get:
+      tags:
+        - Wallet
+      summary: Get current user's wallet
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Wallet details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Wallet not found
+
+  /api/wallet/fund:
+    post:
+      tags:
+        - Wallet
+      summary: Initiate wallet funding
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                  example: 1000.00
+      responses:
+        '200':
+          description: Funding initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      transaction_id:
+                        type: string
+                        format: uuid
+                      reference:
+                        type: string
+                      payment_url:
+                        type: string
+                        format: uri
+
+  /api/wallet/webhook:
+    post:
+      tags:
+        - Wallet
+      summary: Webhook for payment provider
+      security: [] # This endpoint is public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reference:
+                  type: string
+                status:
+                  type: string
+                  example: "PAID"
+      responses:
+        '200':
+          description: Webhook processed
+
+  /api/wallet/transactions:
+    get:
+      tags:
+        - Wallet
+      summary: Get transaction history
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [deposit, withdrawal, call_charge, refund]
+      responses:
+        '200':
+          description: A list of transactions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+                  pagination:
+                    type: object
+                    properties:
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+                      total:
+                        type: integer
+
+  /api/calls/initiate:
+    post:
+      tags:
+        - Calls
+      summary: Initiate a new call
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                receiver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Call initiated
+        '400':
+          description: Self-call not allowed
+        '402':
+          description: Insufficient balance
+        '404':
+          description: Receiver not found
+
+  /api/calls/{call_id}/answer:
+    patch:
+      tags:
+        - Calls
+      summary: Answer a call
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Call answered, status is now 'ongoing'
+        '403':
+          description: Not the receiver of the call
+        '404':
+          description: Call not found
+        '409':
+          description: Call already answered or ended
+
+  /api/calls/{call_id}/end:
+    patch:
+      tags:
+        - Calls
+      summary: End a call
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: "caller_hangup"
+      responses:
+        '200':
+          description: Call ended successfully
+        '403':
+          description: Not a participant in the call
+        '404':
+          description: Call not found
+        '409':
+          description: Call has already ended
+
+  /api/calls/history:
+    get:
+      tags:
+        - Calls
+      summary: Get call history
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [caller, receiver, all]
+            default: all
+      responses:
+        '200':
+          description: A list of call sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calls:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CallSession'
+                  pagination:
+                    type: object
+
+  /api/calls/{call_id}:
+    get:
+      tags:
+        - Calls
+      summary: Get call session details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Call session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallSession'
+        '403':
+          description: Not a participant in the call
+        '404':
+          description: Call not found
