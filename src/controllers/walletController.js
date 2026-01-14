@@ -1,16 +1,23 @@
 const { validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
-const db = require('../utils/db');
+const store = require('../utils/inMemoryStore');
 
 const getWallet = async (req, res) => {
   try {
-    const wallet = await db.query('SELECT id, balance, currency FROM wallets WHERE user_id = $1', [req.user.id]);
+    const wallet = store.wallets.find(w => w.user_id === req.user.id);
 
-    if (wallet.rows.length === 0) {
+    if (!wallet) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Wallet not found' } });
     }
+    
+    // Return a subset of fields
+    const walletResponse = {
+        id: wallet.id,
+        balance: wallet.balance,
+        currency: wallet.currency
+    };
 
-    res.status(200).json({ success: true, data: wallet.rows[0] });
+    res.status(200).json({ success: true, data: walletResponse });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Server error' } });
@@ -26,26 +33,32 @@ const fundWallet = async (req, res) => {
     const { amount } = req.body;
   
     try {
-        const walletResult = await db.query('SELECT id FROM wallets WHERE user_id = $1', [req.user.id]);
-        if (walletResult.rows.length === 0) {
+        const wallet = store.wallets.find(w => w.user_id === req.user.id);
+        if (!wallet) {
             return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Wallet not found' } });
         }
-        const wallet_id = walletResult.rows[0].id;
+        
+        const reference = `MON_${uuidv4().split('-').join('')}`;
 
-        const reference = `MON_${uuidv4()}`;
-
-        const transaction = await db.query(
-        'INSERT INTO transactions (wallet_id, type, amount, reference, status) VALUES ($1, $2, $3, $4, $5) RETURNING id, reference, amount, status',
-        [wallet_id, 'deposit', amount, reference, 'pending']
-        );
+        const newTransaction = {
+            id: uuidv4(),
+            wallet_id: wallet.id,
+            type: 'deposit',
+            amount: parseFloat(amount),
+            reference,
+            status: 'pending',
+            metadata: {},
+            created_at: new Date(),
+        };
+        store.transactions.push(newTransaction);
 
         res.status(200).json({
         success: true,
         data: {
-            transaction_id: transaction.rows[0].id,
-            reference: transaction.rows[0].reference,
-            amount: transaction.rows[0].amount,
-            status: transaction.rows[0].status,
+            transaction_id: newTransaction.id,
+            reference: newTransaction.reference,
+            amount: newTransaction.amount,
+            status: newTransaction.status,
             payment_url: `https://mocked-monnify.com/pay/${reference}`,
         },
         });
@@ -56,24 +69,23 @@ const fundWallet = async (req, res) => {
 };
 
 const webhook = async (req, res) => {
-    const { reference, status, amount, signature } = req.body;
-
-    // In a real application, you would verify the signature from Monnify
-    // For this mock, we'll just trust the payload
+    const { reference, status } = req.body;
     
     if (status === 'PAID') {
         try {
-            const transactionResult = await db.query('SELECT id, wallet_id, amount FROM transactions WHERE reference = $1 AND status = $2', [reference, 'pending']);
-            if (transactionResult.rows.length === 0) {
+            const transaction = store.transactions.find(t => t.reference === reference && t.status === 'pending');
+
+            if (!transaction) {
                 return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Transaction not found or already processed' } });
             }
 
-            const transaction = transactionResult.rows[0];
+            const wallet = store.wallets.find(w => w.id === transaction.wallet_id);
+            if (wallet) {
+                wallet.balance = parseFloat(wallet.balance) + parseFloat(transaction.amount);
+                wallet.updated_at = new Date();
+            }
 
-            // In a real scenario, you'd also verify the amount matches
-            
-            await db.query('UPDATE transactions SET status = $1 WHERE id = $2', ['completed', transaction.id]);
-            await db.query('UPDATE wallets SET balance = balance + $1 WHERE id = $2', [transaction.amount, transaction.wallet_id]);
+            transaction.status = 'completed';
 
             return res.status(200).json({ success: true, message: 'Payment confirmed' });
 
@@ -88,39 +100,39 @@ const webhook = async (req, res) => {
 
 const getTransactions = async (req, res) => {
     const { page = 1, limit = 20, type } = req.query;
-    const offset = (page - 1) * limit;
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const offset = (pageNum - 1) * limitNum;
 
     try {
-        const walletResult = await db.query('SELECT id FROM wallets WHERE user_id = $1', [req.user.id]);
-        if (walletResult.rows.length === 0) {
+        const wallet = store.wallets.find(w => w.user_id === req.user.id);
+        if (!wallet) {
             return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Wallet not found' } });
         }
-        const wallet_id = walletResult.rows[0].id;
         
-        let query = 'SELECT id, type, amount, status, reference, created_at FROM transactions WHERE wallet_id = $1';
-        const queryParams = [wallet_id];
+        let userTransactions = store.transactions.filter(t => t.wallet_id === wallet.id);
         
         if (type) {
-            query += ` AND type = $${queryParams.length + 1}`;
-            queryParams.push(type);
+            userTransactions = userTransactions.filter(t => t.type === type);
         }
 
-        const totalResult = await db.query(`SELECT COUNT(*) FROM (${query}) as sub`, queryParams);
-        const total = parseInt(totalResult.rows[0].count, 10);
-        
-        query += ` ORDER BY created_at DESC LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`;
-        queryParams.push(limit, offset);
-
-        const transactionsResult = await db.query(query, queryParams);
+        const paginatedTransactions = userTransactions.sort((a, b) => b.created_at - a.created_at).slice(offset, offset + limitNum);
 
         res.status(200).json({
             success: true,
             data: {
-                transactions: transactionsResult.rows,
+                transactions: paginatedTransactions.map(t => ({
+                    id: t.id,
+                    type: t.type,
+                    amount: t.amount,
+                    status: t.status,
+                    reference: t.reference,
+                    created_at: t.created_at,
+                })),
                 pagination: {
-                    page: parseInt(page, 10),
-                    limit: parseInt(limit, 10),
-                    total,
+                    page: pageNum,
+                    limit: limitNum,
+                    total: userTransactions.length,
                 }
             }
         });

@@ -17,11 +17,6 @@ After the database and tables are ready, you need to get its unique address, kno
 
   That's it! Once you complete these steps, your application will be connected to a fully prepared database when you run npm start.
 
-> How do i test it? postman? walk me through
-
-✦ Excellent question. Yes, Postman is the perfect tool for testing this API. Here’s a detailed walkthrough of how to test the entire user
-  flow, from registration to a completed call.
-
   Step 1: Setup Postman Environment
 
   To make testing easier, we'll use a Postman Environment to store variables like the server address, user tokens, and IDs.
@@ -48,6 +43,12 @@ After the database and tables are ready, you need to get its unique address, kno
    3       "password": "password123",
    4       "full_name": "User A"
    5     }
+
+   {
+    "email": "successdanesy@gmail.com",
+    "password": "password123",
+    "full_name": "Success Danesy"
+}
    5. Click "Send". You should get a 201 Created response containing a token and user id.
    6. Save the Token and ID: In the response window, highlight the token value, right-click, and select Set: AIleana API > Set as new
       variable. Name it user_a_token. Do the same for the id value and name it user_a_id.
@@ -61,6 +62,12 @@ After the database and tables are ready, you need to get its unique address, kno
    3       "password": "password456",
    4       "full_name": "User B"
    5     }
+
+   {
+    "email": "anyiway15@gmail.com",
+    "password": "password456",
+    "full_name": "ifeanyi john"
+}
    3. Click "Send".
    4. From this response, save the id as a new environment variable named user_b_id.
 

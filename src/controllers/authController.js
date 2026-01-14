@@ -1,7 +1,8 @@
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../utils/db');
+const { v4: uuidv4 } = require('uuid');
+const store = require('../utils/inMemoryStore');
 const config = require('../config');
 
 const register = async (req, res) => {
@@ -13,30 +14,42 @@ const register = async (req, res) => {
   const { email, password, full_name } = req.body;
 
   try {
-    const userExists = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (userExists.rows.length > 0) {
+    const userExists = store.users.find(u => u.email === email);
+    if (userExists) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'User with this email already exists' } });
     }
 
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
-    const newUser = await db.query(
-      'INSERT INTO users (email, password_hash, full_name) VALUES ($1, $2, $3) RETURNING id, email, full_name',
-      [email, password_hash, full_name]
-    );
-
-    const user = newUser.rows[0];
+    const newUser = {
+      id: uuidv4(),
+      email,
+      password_hash,
+      full_name,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    store.users.push(newUser);
 
     // Create a wallet for the new user
-    await db.query('INSERT INTO wallets (user_id) VALUES ($1)', [user.id]);
-
-    const token = jwt.sign({ sub: user.id, email: user.email }, config.jwtSecret, { expiresIn: '24h' });
+    const newWallet = {
+      id: uuidv4(),
+      user_id: newUser.id,
+      balance: 0.00,
+      currency: 'NGN',
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    store.wallets.push(newWallet);
+    
+    const userForToken = { id: newUser.id, email: newUser.email, full_name: newUser.full_name };
+    const token = jwt.sign({ sub: userForToken.id, email: userForToken.email }, config.jwtSecret, { expiresIn: '24h' });
 
     res.status(201).json({
       success: true,
       data: {
-        user,
+        user: userForToken,
         token,
       },
     });
@@ -55,28 +68,29 @@ const login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (result.rows.length === 0) {
+    const user = store.users.find(u => u.email === email);
+    if (!user) {
       return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } });
     }
 
-    const user = result.rows[0];
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
       return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } });
     }
+    
+    const userForResponse = {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+    };
 
     const token = jwt.sign({ sub: user.id, email: user.email }, config.jwtSecret, { expiresIn: '24h' });
 
     res.status(200).json({
       success: true,
       data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          full_name: user.full_name,
-        },
+        user: userForResponse,
         token,
       },
     });

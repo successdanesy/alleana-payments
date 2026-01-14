@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const db = require('../utils/db');
+const store = require('../utils/inMemoryStore');
 
 const protect = async (req, res, next) => {
   let token;
@@ -10,12 +10,18 @@ const protect = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, config.jwtSecret);
 
-      const result = await db.query('SELECT id, email, full_name FROM users WHERE id = $1', [decoded.sub]);
-      if (result.rows.length === 0) {
+      const user = store.users.find(u => u.id === decoded.sub);
+      
+      if (!user) {
         return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Not authorized, user not found' } });
       }
 
-      req.user = result.rows[0];
+      // Attach a clean user object, without the password hash
+      req.user = {
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name
+      };
       next();
     } catch (error) {
       console.error(error);
